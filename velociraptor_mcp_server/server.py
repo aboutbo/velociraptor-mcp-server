@@ -881,22 +881,12 @@ class VelociraptorMCPServer:
             return model_class()
 
     def start(self, host: str = None, port: int = None) -> None:
-        """Start the MCP server."""
-        import uvicorn
-
-        host = host or self.config.server.host
-        port = port or self.config.server.port
-
-        logger.info("Starting Velociraptor MCP Server on %s:%d", host, port)
+        """Start the MCP server using stdio transport."""
+        logger.info("Starting Velociraptor MCP Server (stdio transport)")
         logger.info("SSL Verify: %s", self.config.velociraptor.ssl_verify)
 
-        # Start server with SSE transport
-        uvicorn.run(
-            self.app.sse_app,
-            host=host,
-            port=port,
-            log_level=self.config.server.log_level.lower(),
-        )
+        # stdio transport is required when the server is invoked via MCP command in .mcp.json
+        self.app.run()
 
     async def close(self) -> None:
         """Close the server and cleanup resources."""
