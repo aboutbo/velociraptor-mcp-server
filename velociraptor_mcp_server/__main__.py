@@ -49,6 +49,10 @@ def create_parser() -> argparse.ArgumentParser:
         help="Disable SSL certificate verification",
     )
     parser.add_argument(
+        "--api-key",
+        help="API key for Bearer token authentication (overrides MCP_API_KEY env var)",
+    )
+    parser.add_argument(
         "--transport",
         choices=["sse", "stdio", "streamable-http"],
         default="sse",
@@ -76,6 +80,8 @@ def main() -> None:
     config.server.host = args.host
     config.server.port = args.port
     config.server.log_level = args.log_level
+    if args.api_key:
+        config.server.api_key = args.api_key
 
     try:
         # Validate configuration

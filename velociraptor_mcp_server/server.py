@@ -8,6 +8,7 @@ import logging
 from typing import Optional
 
 from fastmcp import FastMCP
+from fastmcp.server.middleware import Middleware, MiddlewareContext, CallNext
 from pydantic import BaseModel, Field
 
 from .client import VelociraptorClient
@@ -98,6 +99,40 @@ class CollectArtifactDetailsArgs(BaseModel):
     )
 
 
+class BearerAuthMiddleware(Middleware):
+    """Middleware that enforces Bearer token authentication on all MCP requests."""
+
+    def __init__(self, api_key: str) -> None:
+        self.api_key = api_key
+
+    async def on_request(self, context: MiddlewareContext, call_next: CallNext):
+        """Validate the Bearer token on every incoming request."""
+        auth_header = None
+
+        # Try FastMCP's built-in HTTP header helper (available in SSE/HTTP transport)
+        try:
+            from fastmcp.server.dependencies import get_http_headers
+            headers = get_http_headers()
+            auth_header = headers.get("authorization") or headers.get("Authorization")
+        except (RuntimeError, ImportError):
+            pass
+
+        if not auth_header:
+            raise ValueError("Authorization header required. Use: Authorization: Bearer <api-key>")
+
+        # Extract token from "Bearer <token>" format
+        token = None
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:]
+        else:
+            token = auth_header
+
+        if token != self.api_key:
+            raise ValueError("Invalid API key")
+
+        return await call_next(context)
+
+
 class VelociraptorMCPServer:
     """Main MCP server for Velociraptor integration."""
 
@@ -105,6 +140,11 @@ class VelociraptorMCPServer:
         self.config = config
         self._client: Optional[VelociraptorClient] = None
         self.app = FastMCP(name="Velociraptor MCP Server", version="0.1.0")
+
+        # Register auth middleware if API key is configured
+        if config.server.api_key:
+            self.app.add_middleware(BearerAuthMiddleware(config.server.api_key))
+            logger.info("Bearer token authentication enabled")
 
         # Register tools
         self._register_tools()

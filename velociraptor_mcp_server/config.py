@@ -5,7 +5,7 @@ Configuration management for Velociraptor MCP Server.
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -46,6 +46,7 @@ class ServerConfig:
     disabled_tools: List[str] = field(default_factory=list)
     disabled_categories: List[str] = field(default_factory=list)
     read_only: bool = False
+    api_key: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -65,6 +66,7 @@ class ServerConfig:
             disabled_tools=disabled_tools,
             disabled_categories=disabled_categories,
             read_only=os.getenv("VELOCIRAPTOR_READ_ONLY", "false").lower() in {"1", "true", "yes"},
+            api_key=os.getenv("MCP_API_KEY"),
         )
 
 
