@@ -7,8 +7,9 @@ import json
 import logging
 from typing import Optional
 
+import hmac
+
 from fastmcp import FastMCP
-from fastmcp.server.middleware import Middleware, MiddlewareContext, CallNext
 from pydantic import BaseModel, Field
 
 from .client import VelociraptorClient
@@ -99,38 +100,41 @@ class CollectArtifactDetailsArgs(BaseModel):
     )
 
 
-class BearerAuthMiddleware(Middleware):
-    """Middleware that enforces Bearer token authentication on all MCP requests."""
+class BearerAuthASGIMiddleware:
+    """Pure ASGI middleware that enforces Bearer token authentication at the HTTP layer.
 
-    def __init__(self, api_key: str) -> None:
+    Unlike FastMCP's protocol-level middleware, this intercepts requests before
+    they reach the MCP transport, ensuring HTTP headers are always accessible.
+    """
+
+    def __init__(self, app, api_key: str) -> None:
+        self.app = app
         self.api_key = api_key
 
-    async def on_request(self, context: MiddlewareContext, call_next: CallNext):
-        """Validate the Bearer token on every incoming request."""
-        auth_header = None
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            # Extract Authorization header from ASGI scope
+            headers = dict(scope.get("headers", []))
+            auth_value = headers.get(b"authorization", b"").decode("latin-1")
 
-        # Try FastMCP's built-in HTTP header helper (available in SSE/HTTP transport)
-        try:
-            from fastmcp.server.dependencies import get_http_headers
-            headers = get_http_headers()
-            auth_header = headers.get("authorization") or headers.get("Authorization")
-        except (RuntimeError, ImportError):
-            pass
+            token = auth_value[7:] if auth_value.lower().startswith("bearer ") else auth_value
 
-        if not auth_header:
-            raise ValueError("Authorization header required. Use: Authorization: Bearer <api-key>")
+            if not token or not hmac.compare_digest(token, self.api_key):
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"text/plain; charset=utf-8"),
+                        (b"www-authenticate", b"Bearer"),
+                    ],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": b"Unauthorized: invalid or missing Bearer token",
+                })
+                return
 
-        # Extract token from "Bearer <token>" format
-        token = None
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header[7:]
-        else:
-            token = auth_header
-
-        if token != self.api_key:
-            raise ValueError("Invalid API key")
-
-        return await call_next(context)
+        await self.app(scope, receive, send)
 
 
 class VelociraptorMCPServer:
@@ -140,11 +144,6 @@ class VelociraptorMCPServer:
         self.config = config
         self._client: Optional[VelociraptorClient] = None
         self.app = FastMCP(name="Velociraptor MCP Server", version="0.1.0")
-
-        # Register auth middleware if API key is configured
-        if config.server.api_key:
-            self.app.add_middleware(BearerAuthMiddleware(config.server.api_key))
-            logger.info("Bearer token authentication enabled")
 
         # Register tools
         self._register_tools()
@@ -934,6 +933,12 @@ class VelociraptorMCPServer:
 
         if transport == "stdio":
             self.app.run(transport="stdio")
+        elif self.config.server.api_key:
+            logger.info("Listening on %s:%s (Bearer auth enabled)", host, port)
+            import uvicorn
+            asgi_app = self.app.http_app(transport=transport)
+            asgi_app = BearerAuthASGIMiddleware(asgi_app, self.config.server.api_key)
+            uvicorn.run(asgi_app, host=host, port=port)
         else:
             logger.info("Listening on %s:%s", host, port)
             self.app.run(transport=transport, host=host, port=port)
