@@ -880,13 +880,23 @@ class VelociraptorMCPServer:
             # Fallback to empty model
             return model_class()
 
-    def start(self, host: str = None, port: int = None) -> None:
-        """Start the MCP server using stdio transport."""
-        logger.info("Starting Velociraptor MCP Server (stdio transport)")
+    def start(self, transport: str = "sse") -> None:
+        """Start the MCP server.
+
+        Args:
+            transport: Transport mode - 'sse' (HTTP), 'stdio' (stdin/stdout),
+                       or 'streamable-http'.
+        """
+        host = self.config.server.host
+        port = self.config.server.port
+        logger.info("Starting Velociraptor MCP Server (%s transport)", transport)
         logger.info("SSL Verify: %s", self.config.velociraptor.ssl_verify)
 
-        # stdio transport is required when the server is invoked via MCP command in .mcp.json
-        self.app.run()
+        if transport == "stdio":
+            self.app.run(transport="stdio")
+        else:
+            logger.info("Listening on %s:%s", host, port)
+            self.app.run(transport=transport, host=host, port=port)
 
     async def close(self) -> None:
         """Close the server and cleanup resources."""

@@ -48,6 +48,12 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable SSL certificate verification",
     )
+    parser.add_argument(
+        "--transport",
+        choices=["sse", "stdio", "streamable-http"],
+        default="sse",
+        help="Transport mode: sse (HTTP, default), stdio (stdin/stdout), or streamable-http",
+    )
     parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
 
     return parser
@@ -78,7 +84,7 @@ def main() -> None:
 
         # Create and start server
         server = create_server(config)
-        server.start()
+        server.start(transport=args.transport)
 
     except KeyboardInterrupt:
         logger.info("Server stopped by user")
